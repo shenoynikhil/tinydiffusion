@@ -11,13 +11,6 @@ dependencies = [
     "tqdm",
     "matplotlib",
     "seaborn",
-    "pillow",
-]
-
-[project.optional-dependencies]
-dev = [
-    "jupyter",
-    "ipython",
 ]
 
 [build-system]
