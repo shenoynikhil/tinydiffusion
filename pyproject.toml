@@ -5,7 +5,8 @@ description = "Simple diffusion model implementations"
 requires-python = ">=3.8"
 dependencies = [
     "torch>=2.0.0",
-    "torchvision>=0.15.0", 
+    "torchvision>=0.15.0",
+    "einops",
     "lightning>=2.0.0",
     "numpy",
     "tqdm",

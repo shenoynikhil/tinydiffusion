@@ -15,5 +15,8 @@ source .venv/bin/activate
 - [ ] Flow Matching (And Stochastic Interpolants)
 - [ ] Inductive Moment Matching
 
-### Acknowledgements
+
+### Acknowledgements/References.
 - `claude-sonnet-4` for setting up the starter code related to data, environments.
+- [lucidrains](https://github.com/lucidrains/vit-pytorch) for a simple VIT implementation.
+- [DiT](https://github.com/facebookresearch/DiT) from meta for Diffusion transformers.
