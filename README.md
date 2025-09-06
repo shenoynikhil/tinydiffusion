@@ -10,11 +10,8 @@ source .venv/bin/activate
 ```
 
 ### Models
-- Vanilla Flow Matching: Based on the papers [Improving and generalizing flow-based generative models with minibatch optimal transport](https://arxiv.org/abs/2302.00482) (Tong et al. 2024) and [Flow Matching for Generative Modeling](https://arxiv.org/abs/2210.02747) (Lipman et al. 2023). To run this, run `python flow_matching.py cifar10` or `python flow_matching.py mnist`.
-
-### Models
-- [x] Vanilla Flow Matching: [1](https://arxiv.org/abs/2302.00482)[2](https://arxiv.org/abs/2210.02747)
-- [x] Denoising Diffusion Probabilistic Models (DDPM): [1](https://arxiv.org/abs/2006.11239)
+- [x] Vanilla Flow Matching [[1](https://arxiv.org/abs/2302.00482)],[[2](https://arxiv.org/abs/2210.02747)]
+- [x] Denoising Diffusion Probabilistic Models (DDPM) [[1](https://arxiv.org/abs/2006.11239)]
 - [ ] Denoising Diffusion Implicit Models (DDIM)
 - [ ] Consistency Models
 
