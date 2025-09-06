@@ -10,8 +10,8 @@ source .venv/bin/activate
 ```
 
 ### Models
-- [x] Vanilla Flow Matching [[1](https://arxiv.org/abs/2302.00482)],[[2](https://arxiv.org/abs/2210.02747)]
-- [x] Denoising Diffusion Probabilistic Models (DDPM) [[1](https://arxiv.org/abs/2006.11239)]
+- [x] Vanilla Flow Matching [[1](https://arxiv.org/abs/2302.00482)],[[2](https://arxiv.org/abs/2210.02747)]: `python flow_matching.py <cifar10|mnist>`
+- [x] Denoising Diffusion Probabilistic Models (DDPM) [[1](https://arxiv.org/abs/2006.11239)]: `python ddpm.py <cifar10|mnist>`
 - [ ] Denoising Diffusion Implicit Models (DDIM)
 - [ ] Consistency Models
 
