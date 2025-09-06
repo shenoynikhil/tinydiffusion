@@ -11,8 +11,8 @@ from torch.utils.data import DataLoader
 class MNISTConfig:
     dataset: str = "mnist"
     batch_size: int = 64
-    image_size: int = 32
-    num_channels: int = 3
+    image_size: int = 28
+    num_channels: int = 1
     data_dir: str = ".data/"
     split: str = "train"
     num_workers: int = 4

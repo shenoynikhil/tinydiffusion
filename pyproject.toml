@@ -14,5 +14,11 @@ dependencies = [
     "seaborn",
     "pytest",
     "timm",
-    "torchvision",
+]
+[dependency-groups]
+dev = [
+    "ruff>=0.7.0",
+    "pre-commit>=3.0.0",
+    "ipykernel>=6.0.0",
+    "ipywidgets>=8.0.0",
 ]
