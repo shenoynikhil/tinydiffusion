@@ -1,5 +1,5 @@
 ## tinydiffusion
-Simple Diffusion Implementations for Educational Purposes. These are restricted to image based data for now.
+Simple Diffusion/Flow-Matching based Generative Model Implementations for Educational Purposes. These are restricted to image based data for now.
 
 ### Setup
 ```bash
