@@ -1,6 +1,19 @@
+"""
+Notes:
+- This code implements a simple DDPM/DDIM implementation over images. 
+- DDIM is an inference only technique (DDIM and DDPM have the same objective, just different inference distribution)
+therefore, it is implemented as a separate sample_ddim() function only. In practice, I guess one would always
+use the DDIM sampling method as it allows for much faster sampling :).
+- The implementation follows conditional training, so the model is learning over p(x|y) as I provide y (class label) as an additional
+input.
+
+DDPM Paper: https://arxiv.org/abs/2006.11239
+DDIM Paper: https://arxiv.org/abs/2010.02502
+"""
+
 from dataclasses import dataclass
 import os
-import sys
+import argparse
 
 import numpy as np
 import torch
@@ -20,6 +33,10 @@ class DDPMConfig:
     T: int = 1000 # Section 4: Experiments
     beta_1: float = 10**-4
     beta_T: float = 0.02
+    sampling_type: str = "ddpm" # Options: "ddpm", "ddim"
+    S: int = 50 # DDIM sampling Steps
+    ddim_stochasticity: bool = True
+    sigma_eta: float = 1.0 # Equation 16 for sigma_t computation
 
     # DiT args
     patch_size: int = 8
@@ -75,8 +92,19 @@ class DDPM(L.LightningModule):
     def get_alpha_bar_t(self, t: Tensor) -> Tensor:
         return self.alpha_bar_schedule[t]
 
-    def sigma_t(self, t: Tensor) -> Tensor:
-        return self.beta_schedule[t]
+    def sigma_t_ddpm(self, t: Tensor):
+        """sigma_t during sampling: for ddpm it's simply sqrt(beta_t)"""
+        return torch.sqrt(self.beta_schedule[t])
+
+    def sigma_t_ddim(self, alpha_bar_t: Tensor, alpha_bar_t_minus_1: Tensor) -> Tensor:
+        """Variance / Sigma_t: for ddim we follow equation 16
+        """
+        sigma_eta = self.cfg.sigma_eta if self.cfg.ddim_stochasticity else 0.0
+        return (
+            sigma_eta * 
+            torch.sqrt((1 - alpha_bar_t_minus_1)/(1 - alpha_bar_t)) * 
+            torch.sqrt((1 - alpha_bar_t/alpha_bar_t_minus_1))
+        )
 
     def q_xt_given_x0(self, x0: Tensor, t: Tensor) -> tuple[Tensor, Tensor]:
         """Equation 4 in DDPM: Sampling xt from clean sample x0 and noise-scale t"""
@@ -109,6 +137,14 @@ class DDPM(L.LightningModule):
             self.generate_and_save_samples(samples_per_class=10)
 
     def sample(self, n_samples: int, y: int = 0):
+        # run ddim if set sampling_type set to ddim
+        if self.cfg.sampling_type == "ddim":
+            return self.sample_ddim(n_samples, y)
+        
+        # run ddpm by default
+        return self.sample_ddpm(n_samples, y)
+
+    def sample_ddpm(self, n_samples: int, y: int = 0):
         """"DDPM Algorithm 2: Sampling"""
         xt_shape = (n_samples, self.cfg.num_channels, self.cfg.image_dim, self.cfg.image_dim)
         xt = torch.randn(xt_shape, dtype=torch.float32).to(self.device) # start with noisy sample (t=T)
@@ -123,20 +159,58 @@ class DDPM(L.LightningModule):
             t = torch.ones(n_samples, device=self.device, dtype=torch.long) * t_i
             alpha_t = rearrange(1 - self.beta_schedule[t], "b -> b 1 1 1")
             alpha_bar_t = rearrange(self.get_alpha_bar_t(t), "b -> b 1 1 1")
-            sigma_t = rearrange(self.sigma_t(t), "b -> b 1 1 1")
+            sigma_t = rearrange(self.sigma_t_ddpm(t), "b -> b 1 1 1")
             xt = (
                 (1/torch.sqrt(alpha_t)) * (
                     xt - self.network(x=xt, t=t,y=y) * (1 - alpha_t)/(torch.sqrt(1 - alpha_bar_t))
                 )
                 + sigma_t * z
             )
-            
+
+        return xt
+
+    def sample_ddim(self, n_samples: int, y: int = 0):
+        """DDIM Sampling Based on Equation 9, 10, 12"""
+        # sample initial data point
+        xt_shape = (n_samples, self.cfg.num_channels, self.cfg.image_dim, self.cfg.image_dim)
+        xt = torch.randn(xt_shape, dtype=torch.float32).to(self.device) # start with noisy sample (t=T)
+
+        # class label for conditional sampling
+        y = torch.ones(n_samples, device=self.device, dtype=torch.long) * y
+        
+        # setup noise schedule
+        step_size = self.cfg.T // self.cfg.S
+        t_schedule = np.arange(0, self.cfg.T, step=step_size) # DDIM sampling steps
+        t_schedule = np.insert(t_schedule, t_schedule.shape[0], self.cfg.T) # Start from t=T
+        t_schedule = t_schedule[::-1]
+        for i in range(t_schedule.shape[0] - 1):
+            # get time-step t, t-1
+            t = torch.ones(n_samples, device=self.device, dtype=torch.long) * t_schedule[i]
+            t_minus_1 = torch.ones(n_samples, device=self.device, dtype=torch.long) * t_schedule[i + 1] # technically i + 1 since t_schedule is reversed
+
+            # f_theta (clean image prediction) Equation 9
+            eps_theta = self.network(x=xt, t=t, y=y)
+            alpha_bar_t = rearrange(self.get_alpha_bar_t(t), "b -> b 1 1 1")
+            x0_pred = (xt - torch.sqrt(1 - alpha_bar_t) * eps_theta) / torch.sqrt(alpha_bar_t)
+
+            # if last step, we follow Equation 10, 12
+            alpha_bar_t_minus_1 = rearrange(self.get_alpha_bar_t(t_minus_1), "b -> b 1 1 1")
+            sigma_t = self.sigma_t_ddim(alpha_bar_t, alpha_bar_t_minus_1)
+            if t_schedule[i + 1] > 0:
+                xt = (
+                    torch.sqrt(alpha_bar_t_minus_1) * x0_pred
+                    + torch.sqrt(1 - alpha_bar_t_minus_1 - sigma_t**2) * eps_theta
+                    + sigma_t * torch.randn_like(xt)
+                )
+            else:
+                # final step just output x0 prediction
+                xt = x0_pred
+
         return xt
 
     def generate_and_save_samples(self, samples_per_class: int = 10):
         """Generate class-conditional samples and save as grid"""
         self.network.eval()
-        
         with torch.no_grad():
             samples = torch.cat([
                 self.sample(n_samples=samples_per_class, y=class_idx)
@@ -154,38 +228,54 @@ class DDPM(L.LightningModule):
             save_image(grid, filename)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise ValueError("Usage: python ddpm.py <dataset>")
-    dataset = sys.argv[1]
+def get_args():
+    parser = argparse.ArgumentParser(description='Train DDPM model')
+    parser.add_argument('dataset', choices=['mnist', 'cifar10'], help='Dataset to use')
+    parser.add_argument('--sampling_type', choices=['ddpm', 'ddim'], default='ddpm',
+                       help='Sampling type (default: ddpm)')
+    parser.add_argument('--ddim_steps', type=int, default=50,
+                       help='Number of DDIM sampling steps (default: 50)')
+    parser.add_argument('--ddim_stochasticity', action='store_true',
+                       help='Enable DDIM stochasticity (default: False)')
+    parser.add_argument('--T', type=int, default=1000,
+                       help='Number of diffusion steps (default: 1000)')
 
-    if dataset == "mnist":
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = get_args()
+
+    if args.dataset == "mnist":
         from data import MNISTConfig
         data_config = MNISTConfig()
         patch_size = 7 # 28/7 = 4 patches per row/column (so 16 patches in total)
         num_epochs = 20
         evaluate_every_n_epochs = 5
-    elif dataset == "cifar10":
+    elif args.dataset == "cifar10":
         from data import CIFAR10Config
         data_config = CIFAR10Config()
         patch_size = 8 # 32/8 = 4 patches per row/column (so 16 patches in total)
         num_epochs = 100
         evaluate_every_n_epochs = 10
     else:
-        raise ValueError(f"Invalid dataset: {dataset}")
+        raise ValueError(f"Invalid dataset: {args.dataset}")
 
     # setup save path
-    save_path = f".data/ddpm/generated_images/{data_config.dataset}"
+    save_path = f".data/{args.sampling_type}/generated_images/{data_config.dataset}"
     os.makedirs(save_path, exist_ok=True)
 
     model_cfg = DDPMConfig(
-        patch_size=patch_size, 
+        patch_size=patch_size,
         num_channels=data_config.num_channels,
         image_dim=data_config.image_size,
         num_classes=data_config.num_classes,
-        evaluate_every_n_epochs=evaluate_every_n_epochs,  # Generate samples every 5 epochs
+        evaluate_every_n_epochs=evaluate_every_n_epochs,
         save_path=save_path,
         normalize=True,
+        sampling_type=args.sampling_type,
+        S=args.ddim_steps,
+        ddim_stochasticity=args.ddim_stochasticity,
     )
 
     dataloader = create_dataloader(data_config)
