@@ -192,6 +192,7 @@ class DiT(nn.Module):
         self.out_channels = in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
+        self.hidden_size = hidden_size
 
         self.x_embedder = PatchEmbed(
             input_size, patch_size, in_channels, hidden_size, bias=True
@@ -269,6 +270,43 @@ class DiT(nn.Module):
         t = self.t_embedder(t)  # (N, D)
         y = self.y_embedder(y, self.training)  # (N, D)
         c = t + y  # (N, D)
+        for block in self.blocks:
+            x = block(x, c)  # (N, T, D)
+        x = self.final_layer(x, c)  # (N, T, patch_size ** 2 * out_channels)
+        x = self.unpatchify(x)  # (N, out_channels, H, W)
+        return x
+
+
+class DiTMeanFlow(DiT):
+    """Additionally conditions on another time-like variable r"""
+    def __init__(self, **kwargs):
+        # initialize all the stuff that DiT would initialize
+        super().__init__(**kwargs)
+        self.r_embedder = TimestepEmbedder(self.hidden_size)
+        
+        # let's simplify this to a simple mlp to support float inputs (again, jvp requires float inputs while differentiating)
+        self.y_embedder = torch.nn.Linear(1, self.hidden_size)
+
+        # Using SDPA with torch jvp is weird! Turning it off here. (hopefully this isn't needed in the future!)
+        for block in self.blocks:
+            block.attn: Attention
+            block.attn.fused_attn = False # do not use SDPA
+    
+    def forward(self, x: Tensor, t: Tensor, r: Tensor, y: Tensor) -> Tensor:
+        """
+        Forward pass of DiTMeanFlow (just has additional r conditioning).
+        x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
+        t: (N,) tensor of diffusion timesteps
+        r: (N,) tensor for additional timestep conditioning (used for MeanFlows)
+        y: (N,) tensor of class labels
+        """
+        x = (
+            self.x_embedder(x) + self.pos_embed
+        )  # (N, T, D), where T = H * W / patch_size ** 2
+        t = self.t_embedder(t)  # (N, D)
+        r = self.r_embedder(r)  # (N, D)
+        y = self.y_embedder(y.unsqueeze(1))  # (N, D)
+        c = t + y + r  # (N, D)
         for block in self.blocks:
             x = block(x, c)  # (N, T, D)
         x = self.final_layer(x, c)  # (N, T, patch_size ** 2 * out_channels)
