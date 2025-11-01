@@ -45,6 +45,12 @@ class MeanFlowConfig:
 
 
 class MeanFlow(L.LightningModule):
+    """
+    Note: Compared to the flow-matching implementation
+    t=0 (data distribution) and t=1 (prior distribution). 
+    
+    TODO: Reverse this.
+    """
     def __init__(self, cfg: MeanFlowConfig):
         super().__init__()
         self.cfg = cfg
@@ -61,11 +67,7 @@ class MeanFlow(L.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
-        """Algorithm 1, Page 5 from MeanFlows
-        
-        Note: The paper assumes the prior distribution at t=1, and t=0. I have stuck to the 
-        convention used in flow matching (t=0 is prior and t=1 is data distribution)!
-        """
+        """Algorithm 1, Page 5 from MeanFlows"""
         x1, y = batch # image: (b, c, h, w), and label: (b,)
         x0 = torch.randn_like(x1) # gaussian prior
 
@@ -76,8 +78,8 @@ class MeanFlow(L.LightningModule):
         # linearly interpolate (can be something more complex)
         # and compute conditional velocity field
         t_reshaped = rearrange(t, "b -> b 1 1 1")
-        xt = x1 * t_reshaped + x0 * (1 - t_reshaped)
-        v = x1 - x0
+        xt = x1 * (1 - t_reshaped) + x0 * t_reshaped
+        v = x0 - x1
 
         # run DiT to compute predicted velocity field
         y_ = torch.ones_like(t) * y
@@ -89,7 +91,7 @@ class MeanFlow(L.LightningModule):
 
         # Algorithm 1: modified target based on instantaneous velocity
         u_tgt = v - rearrange((t - r), "b -> b 1 1") * dudt
-        u_tgt = u_tgt.detach()
+        u_tgt = u_tgt.detach() # stop grad to disable gradients through jvp
 
         # compute loss between ut and vt, matching conditional velocity field
         loss = torch.mean((u - u_tgt) ** 2)
@@ -116,7 +118,7 @@ class MeanFlow(L.LightningModule):
         t = torch.ones(n_samples,).to(self.device) # t = 1
         r = torch.zeros_like(t) # r = 0
         y = torch.ones_like(t) * y # class
-        x = self.network(e, t=t, r=r, y=y) + e # actual sampling step
+        x = e - self.network(e, t=t, r=r, y=y) # actual sampling step
         return x
 
     def generate_and_save_samples(self, samples_per_class: int = 10):
